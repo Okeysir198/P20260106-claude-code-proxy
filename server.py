@@ -138,6 +138,8 @@ OLLAMA_MODELS = [
     "deepseek-r1:32b",
     "deepseek-r1:70b",
     "gpt-oss:20b",
+    "nemotron-3-nano:30b",
+    "devstral-small-2:24b"
 ]
 
 # Shared model mapping logic

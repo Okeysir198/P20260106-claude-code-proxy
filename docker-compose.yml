@@ -1,0 +1,13 @@
+services:
+  proxy:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    develop:
+      watch:
+        - action: restart
+          path: .env

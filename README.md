@@ -148,8 +148,8 @@ Get your free API key at [https://build.nvidia.com/](https://build.nvidia.com/) 
 PREFERRED_PROVIDER="openai"
 OPENAI_API_KEY="nvapi-..."
 OPENAI_BASE_URL="https://integrate.api.nvidia.com/v1"
-BIG_MODEL="nvidia/nemotron-3-nano-30b-a3b"
-SMALL_MODEL="nvidia/nemotron-3-nano-30b-a3b"
+BIG_MODEL="mistralai/devstral-2-123b-instruct-2512"
+SMALL_MODEL="mistralai/devstral-2-123b-instruct-2512"
 NVIDIA_REASONING_BUDGET=16384
 NVIDIA_ENABLE_THINKING=true
 ```

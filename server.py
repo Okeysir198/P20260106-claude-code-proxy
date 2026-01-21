@@ -1398,7 +1398,16 @@ async def create_message(
         
         # Only log basic info about the request, not the full details
         logger.debug(f"Request for model: {litellm_request.get('model')}, stream: {litellm_request.get('stream', False)}")
-        
+
+        # Ensure last message is from user (required by OpenAI-compatible APIs like NVIDIA)
+        # This fixes the "Cannot set add_generation_prompt to True" error
+        if litellm_request["messages"] and litellm_request["messages"][-1].get("role") == "assistant":
+            logger.debug("Last message is from assistant - adding continuation prompt")
+            litellm_request["messages"].append({
+                "role": "user",
+                "content": "Continue."
+            })
+
         # Handle streaming mode
         if request.stream:
             # Use LiteLLM for streaming
@@ -1613,8 +1622,21 @@ def log_request_beautifully(method, path, claude_model, openai_model, num_messag
     sys.stdout.flush()
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
-    if len(sys.argv) > 1 and sys.argv[1] == "--help":
-        print("Run with: uvicorn server:app --reload --host 0.0.0.0 --port 4000")
-        sys.exit(0)
-    uvicorn.run(app, host="0.0.0.0", port=4000, log_level="error")
+
+    parser = argparse.ArgumentParser(description="Claude Code Proxy Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+    parser.add_argument("--port", "-p", type=int, default=4000, help="Port to bind to (default: 4000)")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
+    parser.add_argument("--log-level", default="error", choices=["debug", "info", "warning", "error"], help="Log level (default: error)")
+
+    args = parser.parse_args()
+
+    print(f"{Colors.BOLD}Claude Code Proxy Server{Colors.RESET}")
+    print(f"Running on {Colors.CYAN}http://{args.host}:{args.port}{Colors.RESET}")
+
+    if args.reload:
+        uvicorn.run("server:app", host=args.host, port=args.port, log_level=args.log_level, reload=True)
+    else:
+        uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)

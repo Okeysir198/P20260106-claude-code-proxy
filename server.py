@@ -188,6 +188,121 @@ def map_model_name(model: str) -> str:
     return model
 
 
+def parse_provider_model(path: str) -> tuple[str, str] | None:
+    """
+    Parse dynamic provider and model from URL path.
+
+    Extracts provider and model name from paths like '/openai:gpt-4.1/v1/messages'.
+    Supports providers: openai, ollama, gemini, google, anthropic.
+    Handles model names containing colons (e.g., 'qwen2.5-coder:32b') and slashes
+    (e.g., 'nvidia/nemotron-3-nano-30b-a3b').
+
+    Args:
+        path: The URL path to parse (e.g., '/openai:gpt-4.1/v1/messages')
+
+    Returns:
+        A tuple of (provider, model) if the path matches the dynamic pattern,
+        or None if it doesn't match (e.g., '/v1/messages' with no dynamic model).
+
+    Examples:
+        >>> parse_provider_model('/openai:gpt-4.1/v1/messages')
+        ('openai', 'gpt-4.1')
+        >>> parse_provider_model('/ollama:qwen2.5-coder:32b/v1/messages')
+        ('ollama', 'qwen2.5-coder:32b')
+        >>> parse_provider_model('/openai:nvidia/nemotron-3-nano-30b-a3b/v1/messages')
+        ('openai', 'nvidia/nemotron-3-nano-30b-a3b')
+        >>> parse_provider_model('/v1/messages')
+        None
+    """
+    # Supported providers
+    supported_providers = {'openai', 'ollama', 'gemini', 'google', 'anthropic'}
+
+    # Remove leading slash if present
+    if path.startswith('/'):
+        path = path[1:]
+
+    # Check if path starts with a supported provider followed by a colon
+    for provider in supported_providers:
+        prefix = f"{provider}:"
+        if path.startswith(prefix):
+            # Extract everything after 'provider:' up to '/v1/' or end
+            remainder = path[len(prefix):]
+
+            # Find the '/v1/' boundary to extract the model name
+            v1_index = remainder.find('/v1/')
+            if v1_index != -1:
+                model = remainder[:v1_index]
+            else:
+                # No /v1/ found, take everything (edge case)
+                model = remainder.rstrip('/')
+
+            if model:
+                logger.debug(f"Parsed dynamic provider/model from path: provider={provider}, model={model}")
+                return (provider, model)
+
+    # No dynamic provider:model pattern found
+    return None
+
+
+def get_credentials_for_provider(provider: str, model: str) -> dict:
+    """
+    Get credentials and settings for a specific provider.
+
+    Returns a dictionary with the appropriate API keys and settings for each provider.
+    The returned dict can be passed directly to LiteLLM completion calls.
+
+    Args:
+        provider: The provider name (openai, ollama, gemini, google, anthropic)
+        model: The model name (used for provider-specific settings like NVIDIA reasoning)
+
+    Returns:
+        dict: Provider-specific credentials and settings including:
+            - api_key: The API key for the provider
+            - api_base: The base URL (if applicable)
+            - Additional provider-specific settings
+    """
+    provider = provider.lower()
+    credentials = {}
+
+    if provider == "openai":
+        credentials["api_key"] = OPENAI_API_KEY
+        if OPENAI_BASE_URL:
+            credentials["api_base"] = OPENAI_BASE_URL
+            # Add NVIDIA reasoning settings only for nemotron models
+            if "nemotron" in model.lower():
+                credentials["extra_body"] = {
+                    "reasoning_budget": NVIDIA_REASONING_BUDGET,
+                    "chat_template_kwargs": {"enable_thinking": NVIDIA_ENABLE_THINKING}
+                }
+                logger.debug(f"NVIDIA NIM credentials: reasoning_budget={NVIDIA_REASONING_BUDGET}, enable_thinking={NVIDIA_ENABLE_THINKING}")
+        logger.debug(f"OpenAI credentials retrieved for model: {model}")
+
+    elif provider == "ollama":
+        credentials["api_key"] = "ollama"  # Dummy key for LiteLLM
+        credentials["api_base"] = OLLAMA_API_BASE
+        credentials["num_ctx"] = OLLAMA_NUM_CTX
+        logger.debug(f"Ollama credentials: api_base={OLLAMA_API_BASE}, num_ctx={OLLAMA_NUM_CTX}")
+
+    elif provider in ("gemini", "google"):
+        if USE_VERTEX_AUTH:
+            credentials["vertex_project"] = VERTEX_PROJECT
+            credentials["vertex_location"] = VERTEX_LOCATION
+            credentials["custom_llm_provider"] = "vertex_ai"
+            logger.debug(f"Vertex AI credentials: project={VERTEX_PROJECT}, location={VERTEX_LOCATION}")
+        else:
+            credentials["api_key"] = GEMINI_API_KEY
+            logger.debug(f"Gemini API key credentials retrieved for model: {model}")
+
+    elif provider == "anthropic":
+        credentials["api_key"] = ANTHROPIC_API_KEY
+        logger.debug(f"Anthropic credentials retrieved for model: {model}")
+
+    else:
+        logger.warning(f"Unknown provider '{provider}', returning empty credentials")
+
+    return credentials
+
+
 # Helper function to clean schema for Gemini
 def clean_gemini_schema(schema: Any) -> Any:
     """Recursively removes unsupported fields from a JSON schema for Gemini."""
@@ -1573,6 +1688,156 @@ async def count_tokens(
         error_traceback = traceback.format_exc()
         logger.error(f"Error counting tokens: {str(e)}\n{error_traceback}")
         raise HTTPException(status_code=500, detail=f"Error counting tokens: {str(e)}")
+
+
+# =============================================================================
+# Dynamic Routing Endpoints - Allow specifying provider:model in the URL path
+# =============================================================================
+
+VALID_PROVIDERS = {"openai", "ollama", "gemini", "google", "anthropic"}
+
+def parse_provider_model(provider_model: str) -> tuple[str, str]:
+    """
+    Parse provider_model string to extract provider and model.
+    Format: "provider:model" where model may contain colons (e.g., "ollama:qwen2.5-coder:32b")
+
+    Returns: (provider, model) tuple
+    Raises: HTTPException if provider is invalid
+    """
+    if ":" not in provider_model:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider_model format: '{provider_model}'. Expected format: 'provider:model'"
+        )
+
+    # Split on first colon only - model may contain additional colons
+    parts = provider_model.split(":", 1)
+    provider = parts[0].lower()
+    model = parts[1]
+
+    if provider not in VALID_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider: '{provider}'. Valid providers are: {', '.join(sorted(VALID_PROVIDERS))}"
+        )
+
+    return provider, model
+
+
+def get_prefixed_model(provider: str, model: str) -> str:
+    """
+    Add the correct LiteLLM prefix based on the provider.
+
+    Returns: Model name with appropriate prefix for LiteLLM
+    """
+    if provider == "openai":
+        return f"openai/{model}"
+    elif provider == "ollama":
+        return f"ollama_chat/{model}"
+    elif provider in ("gemini", "google"):
+        return f"gemini/{model}"
+    elif provider == "anthropic":
+        return f"anthropic/{model}"
+    else:
+        # Shouldn't reach here due to validation, but just in case
+        return model
+
+
+@app.post("/{provider_model:path}/v1/messages/count_tokens")
+async def count_tokens_dynamic(
+    provider_model: str,
+    request: TokenCountRequest,
+    raw_request: Request
+):
+    """
+    Token counting endpoint with dynamic model selection via URL path.
+
+    URL format: /{provider}:{model}/v1/messages/count_tokens
+    Examples:
+        - /openai:gpt-4.1/v1/messages/count_tokens
+        - /ollama:qwen2.5-coder:32b/v1/messages/count_tokens
+        - /gemini:gemini-2.0-flash/v1/messages/count_tokens
+    """
+    try:
+        # Parse the provider and model from URL path
+        provider, model = parse_provider_model(provider_model)
+        prefixed_model = get_prefixed_model(provider, model)
+
+        logger.debug(f"Dynamic token count: provider={provider}, model={model}, prefixed={prefixed_model}")
+
+        # Create a new request with the extracted model (bypassing map_model_name)
+        modified_request = TokenCountRequest(
+            model=prefixed_model,
+            messages=request.messages,
+            system=request.system,
+            tools=request.tools,
+            tool_choice=request.tool_choice,
+            thinking=request.thinking,
+            original_model=model  # Store original for logging
+        )
+
+        # Delegate to the main count_tokens function
+        return await count_tokens(modified_request, raw_request)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_traceback = traceback.format_exc()
+        logger.error(f"Error in dynamic token counting: {str(e)}\n{error_traceback}")
+        raise HTTPException(status_code=500, detail=f"Error counting tokens: {str(e)}")
+
+
+@app.post("/{provider_model:path}/v1/messages")
+async def create_message_dynamic(
+    provider_model: str,
+    request: MessagesRequest,
+    raw_request: Request
+):
+    """
+    Messages endpoint with dynamic model selection via URL path.
+
+    URL format: /{provider}:{model}/v1/messages
+    Examples:
+        - /openai:gpt-4.1/v1/messages
+        - /ollama:qwen2.5-coder:32b/v1/messages
+        - /gemini:gemini-2.0-flash/v1/messages
+        - /anthropic:claude-sonnet-4-20250514/v1/messages
+    """
+    try:
+        # Parse the provider and model from URL path
+        provider, model = parse_provider_model(provider_model)
+        prefixed_model = get_prefixed_model(provider, model)
+
+        logger.debug(f"Dynamic message: provider={provider}, model={model}, prefixed={prefixed_model}")
+
+        # Create a modified request with the extracted model
+        # We need to override the model field to bypass map_model_name
+        modified_request = MessagesRequest(
+            model=prefixed_model,
+            max_tokens=request.max_tokens,
+            messages=request.messages,
+            system=request.system,
+            stop_sequences=request.stop_sequences,
+            stream=request.stream,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            metadata=request.metadata,
+            tools=request.tools,
+            tool_choice=request.tool_choice,
+            thinking=request.thinking
+        )
+
+        # Delegate to the main create_message function
+        return await create_message(modified_request, raw_request)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_traceback = traceback.format_exc()
+        logger.error(f"Error in dynamic message creation: {str(e)}\n{error_traceback}")
+        raise HTTPException(status_code=500, detail=f"Error creating message: {str(e)}")
+
 
 @app.get("/")
 async def root():

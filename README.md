@@ -51,12 +51,22 @@ A proxy server that allows Claude Code CLI and [Claude Agent SDK](https://platfo
 
 4. Use with Claude Code:
    ```bash
+   # Option A: Use environment variables (configure .env first)
    ANTHROPIC_BASE_URL=http://localhost:4000 claude
+
+   # Option B: Specify model directly in URL (no .env needed)
+   ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude
+   ANTHROPIC_BASE_URL=http://localhost:4000/openai:nvidia/nemotron-3-nano-30b-a3b claude
+   ANTHROPIC_BASE_URL=http://localhost:4000/gemini:gemini-2.5-pro claude
    ```
 
    Quick test:
    ```bash
+   # With environment variables
    ANTHROPIC_BASE_URL=http://localhost:4000 claude -p "Say Hello"
+
+   # Or with dynamic model in URL
+   ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude -p "Say Hello"
    ```
 
 5. Use with Claude Agent SDK:
@@ -82,7 +92,11 @@ A proxy server that allows Claude Code CLI and [Claude Agent SDK](https://platfo
 
    Run with:
    ```bash
+   # With environment variables
    ANTHROPIC_BASE_URL=http://localhost:4000 python your_agent.py
+
+   # Or with dynamic model in URL
+   ANTHROPIC_BASE_URL=http://localhost:4000/openai:gpt-4.1 python your_agent.py
    ```
 
 ### Docker
@@ -113,7 +127,11 @@ curl http://localhost:4000/
 
 Test with Claude Code:
 ```bash
+# With environment variables
 ANTHROPIC_BASE_URL=http://localhost:4000 claude -p "hello"
+
+# Or with dynamic model in URL
+ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude -p "hello"
 ```
 
 ## Configuration
@@ -207,6 +225,65 @@ OPENAI_BASE_URL="https://openrouter.ai/api/v1"
 BIG_MODEL="qwen/qwen3-coder-480b-a35b-instruct"
 SMALL_MODEL="qwen/qwen3-coder-480b-a35b-instruct"
 ```
+
+## Dynamic Model Selection via URL
+
+Instead of configuring `BIG_MODEL` and `SMALL_MODEL` environment variables, you can specify the model directly in the URL:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4000/{provider}:{model}
+```
+
+### URL Format
+
+```
+http://localhost:4000/{provider}:{model}/v1/messages
+```
+
+### Examples
+
+**Ollama (local):**
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude -p "Hello"
+```
+
+**NVIDIA NIM:**
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:nvidia/nemotron-3-nano-30b-a3b claude -p "Hello"
+```
+
+**OpenAI:**
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:gpt-4.1 claude -p "Hello"
+```
+
+**Google Gemini:**
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4000/gemini:gemini-2.5-pro claude -p "Hello"
+```
+
+**Anthropic (passthrough):**
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4000/anthropic:claude-sonnet-4 claude -p "Hello"
+```
+
+### Supported Providers
+
+| URL Provider | Backend | Notes |
+|--------------|---------|-------|
+| `openai` | OpenAI API / NVIDIA NIM / OpenRouter | Uses `OPENAI_API_KEY` and `OPENAI_BASE_URL` |
+| `ollama` | Local Ollama | Uses `OLLAMA_API_BASE` |
+| `gemini` / `google` | Google Gemini | Uses `GEMINI_API_KEY` or Vertex AI auth |
+| `anthropic` | Anthropic API | Passthrough mode |
+
+### Backward Compatibility
+
+The existing endpoint `/v1/messages` still works and uses the `BIG_MODEL`/`SMALL_MODEL` environment variables as before.
+
+| Usage | Behavior |
+|-------|----------|
+| `ANTHROPIC_BASE_URL=http://localhost:4000` | Uses env vars (existing behavior) |
+| `ANTHROPIC_BASE_URL=http://localhost:4000/openai:gpt-4.1` | Uses URL model, ignores BIG_MODEL/SMALL_MODEL |
 
 ## Model Mapping
 

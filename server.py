@@ -13,6 +13,7 @@ import re
 import sys
 import traceback
 import asyncio
+import httpx
 
 # Load environment variables from .env file
 load_dotenv()
@@ -67,6 +68,47 @@ USE_VERTEX_AUTH = os.environ.get("USE_VERTEX_AUTH", "False").lower() == "true"
 
 # Get OpenAI base URL from environment (if set)
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL")
+
+# =============================================================================
+# Multi-Provider Support for OpenAI-compatible endpoints
+# =============================================================================
+# Multiple OpenAI-compatible providers can be configured simultaneously.
+# The proxy will intelligently route requests based on model name patterns.
+
+# OpenRouter Configuration (for models like: stepfun/step-3.5-flash:free, qwen/qwen3-coder-480b, etc.)
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
+# NVIDIA NIM Configuration (for models like: nvidia/nemotron-3-nano-30b-a3b, etc.)
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY")
+NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+
+# Model prefix patterns for routing to different OpenAI-compatible providers
+# Format: {prefix: (api_key_var, base_url_var, provider_name)}
+OPENAI_COMPATIBLE_PROVIDERS = {
+    # OpenRouter - matches models like: stepfun/, qwen/, mistralai/, google/, etc.
+    "stepfun/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "qwen/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "mistralai/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "x-ai/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "anthropic/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "google/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "openai/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "meta-llama/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "deepseek/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "microsoft/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "cognitive/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "nousresearch/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "liquid/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "fireworks/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "perplexity/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "sophosympatheia/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+    "gradual/": ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "openrouter"),
+
+    # NVIDIA NIM - matches models like: nvidia/, meta/
+    "nvidia/": ("NVIDIA_API_KEY", "NVIDIA_BASE_URL", "nvidia"),
+    "meta/": ("NVIDIA_API_KEY", "NVIDIA_BASE_URL", "nvidia"),
+}
 
 # Helper function for safe integer parsing from environment
 def safe_int_env(name: str, default: int) -> int:
@@ -265,17 +307,51 @@ def get_credentials_for_provider(provider: str, model: str) -> dict:
     credentials = {}
 
     if provider == "openai":
-        credentials["api_key"] = OPENAI_API_KEY
-        if OPENAI_BASE_URL:
-            credentials["api_base"] = OPENAI_BASE_URL
-            # Add NVIDIA reasoning settings only for nemotron models
-            if "nemotron" in model.lower():
-                credentials["extra_body"] = {
-                    "reasoning_budget": NVIDIA_REASONING_BUDGET,
-                    "chat_template_kwargs": {"enable_thinking": NVIDIA_ENABLE_THINKING}
-                }
-                logger.debug(f"NVIDIA NIM credentials: reasoning_budget={NVIDIA_REASONING_BUDGET}, enable_thinking={NVIDIA_ENABLE_THINKING}")
-        logger.debug(f"OpenAI credentials retrieved for model: {model}")
+        # Check if model matches a known OpenAI-compatible provider pattern
+        matched_provider = None
+        for prefix, (api_key_var, base_url_var, provider_name) in OPENAI_COMPATIBLE_PROVIDERS.items():
+            if model.lower().startswith(prefix):
+                matched_provider = (api_key_var, base_url_var, provider_name)
+                break
+
+        if matched_provider:
+            # Use the matched provider's credentials
+            api_key_var, base_url_var, provider_name = matched_provider
+            api_key = globals().get(api_key_var)
+            base_url = globals().get(base_url_var)
+
+            if api_key:
+                credentials["api_key"] = api_key
+                if base_url:
+                    credentials["api_base"] = base_url
+                    # Add NVIDIA reasoning settings for NVIDIA provider
+                    if provider_name == "nvidia" and "nemotron" in model.lower():
+                        credentials["extra_body"] = {
+                            "reasoning_budget": NVIDIA_REASONING_BUDGET,
+                            "chat_template_kwargs": {"enable_thinking": NVIDIA_ENABLE_THINKING}
+                        }
+                        logger.debug(f"{provider_name.upper()} credentials with reasoning: reasoning_budget={NVIDIA_REASONING_BUDGET}, enable_thinking={NVIDIA_ENABLE_THINKING}")
+                    else:
+                        logger.debug(f"{provider_name.upper()} credentials retrieved for model: {model}")
+                else:
+                    logger.warning(f"{provider_name.upper()} base URL not configured")
+            else:
+                logger.warning(f"{provider_name.upper()} API key not configured, falling back to default OPENAI credentials")
+                # Fall through to default credentials - use the else branch below
+                matched_provider = None
+        else:
+            # Use default OpenAI credentials
+            credentials["api_key"] = OPENAI_API_KEY
+            if OPENAI_BASE_URL:
+                credentials["api_base"] = OPENAI_BASE_URL
+                # Add NVIDIA reasoning settings only for nemotron models
+                if "nemotron" in model.lower():
+                    credentials["extra_body"] = {
+                        "reasoning_budget": NVIDIA_REASONING_BUDGET,
+                        "chat_template_kwargs": {"enable_thinking": NVIDIA_ENABLE_THINKING}
+                    }
+                    logger.debug(f"NVIDIA NIM credentials: reasoning_budget={NVIDIA_REASONING_BUDGET}, enable_thinking={NVIDIA_ENABLE_THINKING}")
+            logger.debug(f"OpenAI credentials retrieved for model: {model}")
 
     elif provider == "ollama":
         credentials["api_key"] = "ollama"  # Dummy key for LiteLLM
@@ -443,6 +519,7 @@ def parse_tool_arguments(arguments: Any) -> Dict[str, Any]:
 class ContentBlockText(BaseModel):
     type: Literal["text"]
     text: str
+    cache_control: Optional[Dict[str, Any]] = None
     model_config = ConfigDict(extra="allow")
 
 
@@ -457,6 +534,7 @@ class ContentBlockToolUse(BaseModel):
     id: str
     name: str
     input: Dict[str, Any]
+    cache_control: Optional[Dict[str, Any]] = None
     model_config = ConfigDict(extra="allow")
 
 
@@ -464,6 +542,13 @@ class ContentBlockToolResult(BaseModel):
     type: Literal["tool_result"]
     tool_use_id: str
     content: Union[str, List[Dict[str, Any]], Dict[str, Any], List[Any], Any]
+    cache_control: Optional[Dict[str, Any]] = None
+    model_config = ConfigDict(extra="allow")
+
+
+class ContentBlockThinking(BaseModel):
+    type: Literal["thinking"]
+    thinking: str
     model_config = ConfigDict(extra="allow")
 
 
@@ -475,7 +560,7 @@ class SystemContent(BaseModel):
 
 class Message(BaseModel):
     role: Literal["user", "assistant"]
-    content: Union[str, List[Union[ContentBlockText, ContentBlockImage, ContentBlockToolUse, ContentBlockToolResult]]]
+    content: Union[str, List[Union[ContentBlockText, ContentBlockImage, ContentBlockToolUse, ContentBlockToolResult, ContentBlockThinking]]]
     model_config = ConfigDict(extra="allow")
 
 
@@ -548,7 +633,7 @@ class MessagesResponse(BaseModel):
     id: str
     model: str
     role: Literal["assistant"] = "assistant"
-    content: List[Union[ContentBlockText, ContentBlockToolUse]]
+    content: List[Union[ContentBlockText, ContentBlockToolUse, ContentBlockThinking]]
     type: Literal["message"] = "message"
     stop_reason: Optional[Literal["end_turn", "max_tokens", "stop_sequence", "tool_use"]] = None
     stop_sequence: Optional[str] = None
@@ -612,11 +697,82 @@ def parse_tool_result_content(content):
     except Exception:
         return "Unparseable content"
 
+
+async def call_ollama_native(anthropic_request: MessagesRequest, model: str, raw_request: Request):
+    """
+    Direct proxy to Ollama's native Anthropic-compatible API at /v1/messages.
+
+    Ollama natively supports the Anthropic API format, so we simply proxy the request
+    without any conversion. This is the same as using:
+        ANTHROPIC_AUTH_TOKEN=ollama ANTHROPIC_BASE_URL=http://localhost:11434 claude
+
+    The proxy only:
+    1. Extracts the clean model name (removes ollama/ prefix)
+    2. Forwards the request to Ollama's /v1/messages endpoint
+    3. Returns Ollama's response as-is
+    """
+    # Extract clean model name (remove ollama/ or ollama_chat/ prefix)
+    clean_model = model
+    for prefix in ["ollama_chat/", "ollama/"]:
+        if clean_model.startswith(prefix):
+            clean_model = clean_model[len(prefix):]
+            break
+
+    # Get the raw request body and update the model
+    body = await raw_request.body()
+    body_dict = json.loads(body.decode('utf-8'))
+    body_dict["model"] = clean_model
+
+    logger.debug(f"🎯 Direct proxy to Ollama Anthropic API: model={clean_model}, stream={anthropic_request.stream}")
+
+    # Prepare headers - pass through relevant headers from original request
+    headers = {
+        "Content-Type": "application/json",
+        "anthropic-version": raw_request.headers.get("anthropic-version", "2023-06-01"),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            if anthropic_request.stream:
+                # Streaming response - proxy the stream directly
+                async def stream_ollama():
+                    async with client.stream(
+                        "POST",
+                        f"{OLLAMA_API_BASE.rstrip('/')}/v1/messages",
+                        json=body_dict,
+                        headers=headers
+                    ) as response:
+                        response.raise_for_status()
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+
+                return StreamingResponse(
+                    stream_ollama(),
+                    media_type="text/event-stream"
+                )
+            else:
+                # Non-streaming response - return Ollama's response directly
+                response = await client.post(
+                    f"{OLLAMA_API_BASE.rstrip('/')}/v1/messages",
+                    json=body_dict,
+                    headers=headers
+                )
+                response.raise_for_status()
+                # Return Ollama's response as-is (already in Anthropic format)
+                return response.json()
+    except httpx.HTTPError as e:
+        logger.error(f"Ollama API error: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code if hasattr(e, 'response') else 500,
+            detail=f"Ollama API error: {str(e)}"
+        )
+
+
 def convert_anthropic_to_litellm(anthropic_request: MessagesRequest) -> Dict[str, Any]:
     """Convert Anthropic API request format to LiteLLM format (which follows OpenAI)."""
     # LiteLLM already handles Anthropic models when using the format model="anthropic/claude-3-opus-20240229"
     # So we just need to convert our Pydantic model to a dict in the expected format
-    
+
     messages = []
     
     # Add system message if present
@@ -1333,45 +1489,36 @@ async def create_message(
             clean_model = clean_model[len("openai/"):]
         
         logger.debug(f"📊 PROCESSING REQUEST: Model={request.model}, Stream={request.stream}")
-        
-        # Convert Anthropic request to LiteLLM format
-        litellm_request = convert_anthropic_to_litellm(request)
-        
-        # Determine which API key to use based on the model
-        if request.model.startswith("openai/"):
-            litellm_request["api_key"] = OPENAI_API_KEY
-            # Use custom OpenAI base URL if configured
-            if OPENAI_BASE_URL:
-                litellm_request["api_base"] = OPENAI_BASE_URL
-                # Add NVIDIA reasoning settings only for nemotron models
-                if "nemotron" in request.model.lower():
-                    litellm_request["extra_body"] = {
-                        "reasoning_budget": NVIDIA_REASONING_BUDGET,
-                        "chat_template_kwargs": {"enable_thinking": NVIDIA_ENABLE_THINKING}
-                    }
-                    logger.debug(f"Using NVIDIA NIM with reasoning_budget={NVIDIA_REASONING_BUDGET}, enable_thinking={NVIDIA_ENABLE_THINKING}")
-                logger.debug(f"Using custom base URL {OPENAI_BASE_URL} for model: {request.model}")
-            else:
-                logger.debug(f"Using OpenAI API key for model: {request.model}")
-        elif request.model.startswith("gemini/"):
-            if USE_VERTEX_AUTH:
-                litellm_request["vertex_project"] = VERTEX_PROJECT
-                litellm_request["vertex_location"] = VERTEX_LOCATION
-                litellm_request["custom_llm_provider"] = "vertex_ai"
-                logger.debug(f"Using Gemini ADC with project={VERTEX_PROJECT}, location={VERTEX_LOCATION} and model: {request.model}")
-            else:
-                litellm_request["api_key"] = GEMINI_API_KEY
-                logger.debug(f"Using Gemini API key for model: {request.model}")
+
+        # Determine provider from model prefix
+        provider = "openai"  # Default provider for most models
+        if request.model.startswith("gemini/"):
+            provider = "gemini"
         elif request.model.startswith("ollama/") or request.model.startswith("ollama_chat/"):
-            # Configure Ollama with custom API base and context length
-            # Ollama doesn't need auth but LiteLLM may require a dummy key
-            litellm_request["api_base"] = OLLAMA_API_BASE
-            litellm_request["api_key"] = "ollama"  # Dummy key for LiteLLM
-            litellm_request["num_ctx"] = OLLAMA_NUM_CTX
-            logger.debug(f"Using Ollama with api_base={OLLAMA_API_BASE}, num_ctx={OLLAMA_NUM_CTX} for model: {request.model}")
-        else:
-            litellm_request["api_key"] = ANTHROPIC_API_KEY
-            logger.debug(f"Using Anthropic API key for model: {request.model}")
+            provider = "ollama"
+        elif request.model.startswith("anthropic/"):
+            provider = "anthropic"
+
+        # For Ollama models, use native API (supports Anthropic format directly)
+        if provider == "ollama":
+            logger.debug(f"🎯 Using native Ollama Anthropic API for model: {request.model}")
+            ollama_response = await call_ollama_native(request, request.model, raw_request)
+
+            # If it's a StreamingResponse, return it directly
+            if isinstance(ollama_response, StreamingResponse):
+                return ollama_response
+
+            # Otherwise, it's already in Anthropic format, return directly
+            return ollama_response
+
+        # For other providers, convert to LiteLLM format
+        litellm_request = convert_anthropic_to_litellm(request)
+
+        # Get credentials for this provider (with intelligent routing for openai)
+        credentials = get_credentials_for_provider(provider, request.model)
+
+        # Apply credentials to the request
+        litellm_request.update(credentials)
         
         # For OpenAI models - modify request format to work with limitations
         if "openai" in litellm_request["model"] and "messages" in litellm_request:

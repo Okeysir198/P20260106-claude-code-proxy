@@ -1,19 +1,27 @@
 # Claude Code Proxy
 
-A proxy server that allows Claude Code CLI and [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) to use alternative AI backends via LiteLLM.
+A universal proxy server that allows **Claude Code CLI** and **Claude Agent SDK** to use **multiple AI backends simultaneously** with intelligent routing. Features native Anthropic format support for Ollama.
 
 ```
 ┌───────────────────┐       ┌─────────────────┐      ┌──────────────────────────┐
-│  Claude Code CLI  │       │                 │      │  NVIDIA NIM (Recommended)│
-│                   │─────▶│  Claude Code    │─────▶│  Ollama (Local)          │
-│ Claude Agent SDK  │       │     Proxy       │      │  OpenAI                  │
-│                   │◀─────│   (LiteLLM)     │◀─────│  Google Gemini           │
-└───────────────────┘       └─────────────────┘      │  Anthropic               │
-                                                     │  OpenRouter              │
-                                                     └──────────────────────────┘
-   Anthropic API            Translates &                  AI Backends
-     Format                 Routes Request
+│  Claude Code CLI  │       │                 │      │  🚀 Multi-Provider:     │
+│                   │─────▶│  Claude Code    │─────▶│  • OpenRouter (400+)     │
+│ Claude Agent SDK  │       │     Proxy       │      │  • NVIDIA NIM            │
+│                   │◀─────│  (Smart Router) │◀─────│  • Ollama (Native)       │
+└───────────────────┘       └─────────────────┘      │  • OpenAI                │
+                                                     │  • Google Gemini         │
+   Anthropic API            Intelligent              │  • Anthropic             │
+     Format                 Routing                   └──────────────────────────┘
 ```
+
+## ✨ Key Features
+
+- **🔄 Multi-Provider Support** - Configure all providers simultaneously, proxy intelligently routes based on model name
+- **⚡ Ollama Native Format** - Zero overhead for Ollama, full Anthropic format support including thinking blocks
+- **🧠 Thinking Blocks Support** - Full support for Anthropic's extended thinking responses
+- **🎯 Dynamic Model Selection** - Specify any model via URL path
+- **🔌 400+ OpenRouter Models** - Access to latest open-weight models
+- **🛠️ Tool Use Support** - Full function calling support across providers
 
 ## Quick Start
 
@@ -21,13 +29,7 @@ A proxy server that allows Claude Code CLI and [Claude Agent SDK](https://platfo
 
 - Python 3.10+
 - [uv](https://github.com/astral-sh/uv) package manager
-- API key for your chosen provider:
-  - [NVIDIA NIM](https://build.nvidia.com/) (Recommended - free tier available)
-  - [Ollama](https://ollama.com/) (Local - no API key needed)
-  - [OpenAI](https://platform.openai.com/)
-  - [Google Gemini](https://aistudio.google.com/)
-  - [OpenRouter](https://openrouter.ai/)
-  - [Anthropic](https://console.anthropic.com/)
+- API keys for your chosen providers (all optional - use what you want!)
 
 ### Setup
 
@@ -41,7 +43,7 @@ A proxy server that allows Claude Code CLI and [Claude Agent SDK](https://platfo
 2. Configure environment:
    ```bash
    cp .env.example .env
-   # Edit .env with your API keys and preferences
+   # Edit .env with your API keys
    ```
 
 3. Run the server:
@@ -51,188 +53,159 @@ A proxy server that allows Claude Code CLI and [Claude Agent SDK](https://platfo
 
 4. Use with Claude Code:
    ```bash
-   # Option A: Use environment variables (configure .env first)
+   # Uses your default provider (configured in .env)
    ANTHROPIC_BASE_URL=http://localhost:4000 claude
 
-   # Option B: Specify model directly in URL (no .env needed)
-   ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude
-   ANTHROPIC_BASE_URL=http://localhost:4000/openai:nvidia/nemotron-3-nano-30b-a3b claude
-   ANTHROPIC_BASE_URL=http://localhost:4000/gemini:gemini-2.5-pro claude
-   ```
-
-   Quick test:
-   ```bash
-   # With environment variables
-   ANTHROPIC_BASE_URL=http://localhost:4000 claude -p "Say Hello"
-
-   # Or with dynamic model in URL
-   ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude -p "Say Hello"
-   ```
-
-5. Use with Claude Agent SDK:
-   ```python
-   import asyncio
-   from claude_code_sdk import query, ClaudeCodeOptions
-
-   async def main():
-       options = ClaudeCodeOptions(
-           system_prompt="You are an expert Python developer",
-           permission_mode='acceptEdits',
-           cwd="/your/project/path"
-       )
-
-       async for message in query(
-           prompt="Create a Python file that says hello",
-           options=options
-       ):
-           print(message)
-
-   asyncio.run(main())
-   ```
-
-   Run with:
-   ```bash
-   # With environment variables
-   ANTHROPIC_BASE_URL=http://localhost:4000 python your_agent.py
-
-   # Or with dynamic model in URL
-   ANTHROPIC_BASE_URL=http://localhost:4000/openai:gpt-4.1 python your_agent.py
+   # Or specify any model dynamically via URL
+   ANTHROPIC_BASE_URL=http://localhost:4000/openai:stepfun/step-3.5-flash:free claude
    ```
 
 ### Docker
 
-Build and run from source:
-```bash
-docker build -t claude-code-proxy .
-docker run -d --env-file .env -p 4000:4000 claude-code-proxy
-```
-
-Or with docker-compose:
 ```bash
 docker compose up -d
 ```
 
-For development (auto-restart on `.env` changes):
-```bash
-docker compose watch
-```
+## Multi-Provider Configuration
 
-### Testing
+### All Providers Simultaneously
 
-Verify the proxy is running:
-```bash
-curl http://localhost:4000/
-# Expected: {"message":"Claude Code Proxy"}
-```
-
-Test with Claude Code:
-```bash
-# With environment variables
-ANTHROPIC_BASE_URL=http://localhost:4000 claude -p "hello"
-
-# Or with dynamic model in URL
-ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude -p "hello"
-```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PREFERRED_PROVIDER` | Backend provider: `openai`, `google`, `ollama`, or `anthropic` | `openai` |
-| `OPENAI_BASE_URL` | Custom OpenAI-compatible endpoint (NVIDIA, OpenRouter, etc.) | - |
-| `OPENAI_API_KEY` | OpenAI/NVIDIA/OpenRouter API key | - |
-| `BIG_MODEL` | Model for sonnet/opus requests | `gpt-4.1` |
-| `SMALL_MODEL` | Model for haiku requests | `gpt-4.1-mini` |
-| `NVIDIA_REASONING_BUDGET` | NVIDIA reasoning token budget | `16384` |
-| `NVIDIA_ENABLE_THINKING` | Enable NVIDIA thinking mode | `true` |
-| `OLLAMA_API_BASE` | Ollama server URL | `http://localhost:11434` |
-| `OLLAMA_NUM_CTX` | Ollama context length (use 128000 for long context) | `128000` |
-| `GEMINI_API_KEY` | Google AI Studio API key | - |
-| `USE_VERTEX_AUTH` | Use GCP ADC instead of API key | `false` |
-| `VERTEX_PROJECT` | GCP project ID (if using Vertex) | - |
-| `VERTEX_LOCATION` | GCP region (if using Vertex) | - |
-| `ANTHROPIC_API_KEY` | Anthropic API key (for passthrough mode) | - |
-| `MAX_OUTPUT_TOKENS` | Max output tokens cap (0 = no cap) | `0` |
-
-### Example Configurations
-
-**NVIDIA NIM (Recommended - Default):**
-
-Get your free API key at [https://build.nvidia.com/](https://build.nvidia.com/) and browse available models at [https://build.nvidia.com/models](https://build.nvidia.com/models).
+The proxy supports **all providers at once** with intelligent routing:
 
 ```dotenv
-PREFERRED_PROVIDER="openai"
-OPENAI_API_KEY="nvapi-..."
-OPENAI_BASE_URL="https://integrate.api.nvidia.com/v1"
-BIG_MODEL="mistralai/devstral-2-123b-instruct-2512"
-SMALL_MODEL="mistralai/devstral-2-123b-instruct-2512"
+# =============================================================================
+# Provider 1: Ollama (Native Anthropic Format)
+# =============================================================================
+PREFERRED_PROVIDER="ollama"
+OLLAMA_API_BASE="http://localhost:11434"  # or http://host.docker.internal:11434 for Docker
+OLLAMA_NUM_CTX=60000
+BIG_MODEL="gpt-oss:20b"
+SMALL_MODEL="gpt-oss:20b"
+
+# =============================================================================
+# Provider 2: OpenRouter (400+ models)
+# =============================================================================
+OPENROUTER_API_KEY="sk-or-v1-..."
+OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
+
+# =============================================================================
+# Provider 3: NVIDIA NIM API
+# =============================================================================
+NVIDIA_API_KEY="nvapi-..."
+NVIDIA_BASE_URL="https://integrate.api.nvidia.com/v1"
 NVIDIA_REASONING_BUDGET=16384
 NVIDIA_ENABLE_THINKING=true
 ```
 
-**Ollama (local):**
+### Intelligent Routing
 
-> **Important:** Use models with long context window support. Set `OLLAMA_NUM_CTX=128000` for optimal performance.
+The proxy automatically routes requests based on model name prefixes:
 
-Recommended coding models:
+| Model Prefix | Provider | Example Models |
+|-------------|----------|----------------|
+| `stepfun/`, `qwen/`, `mistralai/`, `x-ai/` | OpenRouter | `stepfun/step-3.5-flash:free` |
+| `nvidia/`, `meta/` | NVIDIA NIM | `nvidia/nemotron-3-nano-30b-a3b` |
+| `ollama/`, default | Ollama | `gpt-oss:20b` |
+
+### Usage Examples
+
+```bash
+# OpenRouter (free model)
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:stepfun/step-3.5-flash:free claude -p "Hello"
+
+# NVIDIA NIM
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:nvidia/nemotron-3-nano-30b-a3b claude -p "Hello"
+
+# Ollama (uses default BIG_MODEL)
+ANTHROPIC_BASE_URL=http://localhost:4000 claude -p "Hello"
+```
+
+## Provider-Specific Configuration
+
+### Ollama (Native Anthropic Format) ⚡
+
+> **Direct Ollama:** Ollama supports the Anthropic API natively! You can use it directly:
+> ```bash
+> ANTHROPIC_AUTH_TOKEN=ollama ANTHROPIC_BASE_URL=http://localhost:11434 claude --model glm-4.7-flash
+> ```
+>
+> **Via Proxy:** The proxy adds model mapping and multi-provider support:
+> ```bash
+> ANTHROPIC_BASE_URL=http://localhost:4000 claude  # Maps claude-sonnet-4 → gpt-oss:20b
+> ```
+
+**Benefits of Using via Proxy:**
+- ✅ **Model Mapping** - Use Claude model names (`claude-sonnet-4`) → Ollama models
+- ✅ **Multi-Provider** - Switch between OpenRouter, NVIDIA, Ollama in one config
+- ✅ **Zero Overhead** - Direct proxy to Ollama's `/v1/messages`, no conversion
+- ✅ **Full Feature Support** - Content blocks, thinking, tools, streaming
+
+**Recommended Coding Models:**
 - `gpt-oss:20b` - OpenAI's open-weight model, excellent for coding/tool use, runs in 16GB RAM
 - `qwen2.5-coder:32b` - Best for multi-language projects, competitive with GPT-4o
 - `qwen3-coder` - Handles massive codebases, comparable to Claude Sonnet
-- `devstral` - Excellent for file operations and large codebase management
-- `deepseek-coder-v2` - Supports 300+ languages, great for code generation
+- `devstral-small-2:24b` - Excellent for file operations
+- `glm-4.7-flash` - Fast reasoning model
 
 ```dotenv
 PREFERRED_PROVIDER="ollama"
-# Without Docker: use localhost
 OLLAMA_API_BASE="http://localhost:11434"
-# With Docker: use host.docker.internal
-# OLLAMA_API_BASE="http://host.docker.internal:11434"
-OLLAMA_NUM_CTX=128000
+OLLAMA_NUM_CTX=60000
 BIG_MODEL="gpt-oss:20b"
 SMALL_MODEL="gpt-oss:20b"
 ```
 
-**OpenAI:**
+### OpenRouter (400+ Models)
+
+Get your API key at [https://openrouter.ai/keys](https://openrouter.ai/keys) and browse models at [https://openrouter.ai/models](https://openrouter.ai/models).
+
+**Top Free Models:**
+- `stepfun/step-3.5-flash:free` - Fast, free tier
+- `google/gemini-2.0-flash-exp:free` - Requires privacy settings enabled
+
+**Top Paid Models:**
+- `qwen/qwen3-coder-480b-a35b-instruct` - Best for agentic coding
+- `mistralai/devstral-2` - 123B dense, 256K context
+- `x-ai/grok-3-beta` - Latest xAI model
+- `anthropic/claude-sonnet-4` - Claude Sonnet 4
+- `google/gemini-2.5-pro-preview` - Gemini 2.5 Pro
+
 ```dotenv
-PREFERRED_PROVIDER="openai"
+OPENROUTER_API_KEY="sk-or-v1-..."
+OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
+```
+
+### NVIDIA NIM
+
+Get your free API key at [https://build.nvidia.com/](https://build.nvidia.com/).
+
+```dotenv
+NVIDIA_API_KEY="nvapi-..."
+NVIDIA_BASE_URL="https://integrate.api.nvidia.com/v1"
+NVIDIA_REASONING_BUDGET=16384
+NVIDIA_ENABLE_THINKING=true
+```
+
+### OpenAI
+
+```dotenv
 OPENAI_API_KEY="sk-..."
 OPENAI_BASE_URL="https://api.openai.com/v1"
 BIG_MODEL="gpt-4.1"
 SMALL_MODEL="gpt-4.1-mini"
 ```
 
-**Google Gemini:**
+### Google Gemini
+
 ```dotenv
-PREFERRED_PROVIDER="google"
 GEMINI_API_KEY="your-key"
 BIG_MODEL="gemini-2.5-pro"
 SMALL_MODEL="gemini-2.5-flash"
 ```
 
-**Anthropic passthrough:**
-```dotenv
-PREFERRED_PROVIDER="anthropic"
-ANTHROPIC_API_KEY="sk-ant-..."
-```
+## Dynamic Model Selection
 
-**OpenRouter (400+ models):**
-```dotenv
-PREFERRED_PROVIDER="openai"
-OPENAI_API_KEY="sk-or-v1-..."
-OPENAI_BASE_URL="https://openrouter.ai/api/v1"
-BIG_MODEL="qwen/qwen3-coder-480b-a35b-instruct"
-SMALL_MODEL="qwen/qwen3-coder-480b-a35b-instruct"
-```
-
-## Dynamic Model Selection via URL
-
-Instead of configuring `BIG_MODEL` and `SMALL_MODEL` environment variables, you can specify the model directly in the URL:
-
-```bash
-ANTHROPIC_BASE_URL=http://localhost:4000/{provider}:{model}
-```
+Specify any model directly in the URL without modifying `.env`:
 
 ### URL Format
 
@@ -242,67 +215,118 @@ http://localhost:4000/{provider}:{model}/v1/messages
 
 ### Examples
 
-**Ollama (local):**
 ```bash
-ANTHROPIC_BASE_URL=http://localhost:4000/ollama:gpt-oss:20b claude -p "Hello"
+# OpenRouter models
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:stepfun/step-3.5-flash:free claude
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:qwen/qwen3-coder-480b-a35b-instruct claude
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:mistralai/devstral-2 claude
+
+# NVIDIA NIM
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:nvidia/nemotron-3-nano-30b-a3b claude
+
+# OpenAI
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:gpt-4.1 claude
+
+# Google Gemini
+ANTHROPIC_BASE_URL=http://localhost:4000/gemini:gemini-2.5-pro claude
+
+# Anthropic (passthrough)
+ANTHROPIC_BASE_URL=http://localhost:4000/anthropic:claude-sonnet-4 claude
+
+# Ollama (with specific model)
+ANTHROPIC_BASE_URL=http://localhost:4000/ollama:glm-4.7-flash:latest claude
 ```
 
-**NVIDIA NIM:**
-```bash
-ANTHROPIC_BASE_URL=http://localhost:4000/openai:nvidia/nemotron-3-nano-30b-a3b claude -p "Hello"
-```
+## Supported Providers
 
-**OpenAI:**
-```bash
-ANTHROPIC_BASE_URL=http://localhost:4000/openai:gpt-4.1 claude -p "Hello"
-```
-
-**Google Gemini:**
-```bash
-ANTHROPIC_BASE_URL=http://localhost:4000/gemini:gemini-2.5-pro claude -p "Hello"
-```
-
-**Anthropic (passthrough):**
-```bash
-ANTHROPIC_BASE_URL=http://localhost:4000/anthropic:claude-sonnet-4 claude -p "Hello"
-```
-
-### Supported Providers
-
-| URL Provider | Backend | Notes |
-|--------------|---------|-------|
-| `openai` | OpenAI API / NVIDIA NIM / OpenRouter | Uses `OPENAI_API_KEY` and `OPENAI_BASE_URL` |
-| `ollama` | Local Ollama | Uses `OLLAMA_API_BASE` |
-| `gemini` / `google` | Google Gemini | Uses `GEMINI_API_KEY` or Vertex AI auth |
+| URL Provider | Backend | Auto-Routed Models |
+|--------------|---------|-------------------|
+| `openai` | OpenAI / OpenRouter / NVIDIA | `stepfun/*`, `qwen/*`, `nvidia/*`, `meta/*`, etc. |
+| `ollama` | Local Ollama (Native) | Default provider, `ollama/*` |
+| `gemini` / `google` | Google Gemini | `gemini/*` |
 | `anthropic` | Anthropic API | Passthrough mode |
 
-### Backward Compatibility
+## Environment Variables
 
-The existing endpoint `/v1/messages` still works and uses the `BIG_MODEL`/`SMALL_MODEL` environment variables as before.
-
-| Usage | Behavior |
-|-------|----------|
-| `ANTHROPIC_BASE_URL=http://localhost:4000` | Uses env vars (existing behavior) |
-| `ANTHROPIC_BASE_URL=http://localhost:4000/openai:gpt-4.1` | Uses URL model, ignores BIG_MODEL/SMALL_MODEL |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| **Multi-Provider** | | |
+| `OPENROUTER_API_KEY` | OpenRouter API key | - |
+| `OPENROUTER_BASE_URL` | OpenRouter endpoint | `https://openrouter.ai/api/v1` |
+| `NVIDIA_API_KEY` | NVIDIA NIM API key | - |
+| `NVIDIA_BASE_URL` | NVIDIA NIM endpoint | `https://integrate.api.nvidia.com/v1` |
+| **Ollama** | | |
+| `OLLAMA_API_BASE` | Ollama server URL | `http://localhost:11434` |
+| `OLLAMA_NUM_CTX` | Context length | `128000` |
+| **OpenAI** | | |
+| `OPENAI_API_KEY` | OpenAI API key | - |
+| `OPENAI_BASE_URL` | Custom endpoint | - |
+| **General** | | |
+| `PREFERRED_PROVIDER` | Default provider | `openai` |
+| `BIG_MODEL` | Model for sonnet/opus | `gpt-4.1` |
+| `SMALL_MODEL` | Model for haiku | `gpt-4.1-mini` |
+| `MAX_OUTPUT_TOKENS` | Output token cap (0 = no cap) | `0` |
 
 ## Model Mapping
 
-The proxy maps Claude model names to your configured backend:
+Claude model names are automatically mapped:
 
 | Request contains | Maps to |
 |------------------|---------|
 | `haiku` | `SMALL_MODEL` |
 | `sonnet`, `opus`, `claude` | `BIG_MODEL` |
 
-Models are automatically prefixed with the provider (`openai/`, `gemini/`, `ollama_chat/`, or `anthropic/`).
+## Content Block Support
+
+The proxy supports all Anthropic content block types:
+
+| Block Type | Description | Supported By |
+|------------|-------------|--------------|
+| `text` | Plain text content | ✅ All providers |
+| `image` | Image content (base64) | ✅ All providers |
+| `tool_use` | Function calling requests | ✅ All providers |
+| `tool_result` | Function call results | ✅ All providers |
+| `thinking` | Extended reasoning blocks | ✅ Ollama, OpenRouter |
+
+**Note:** Some models (like Ollama's `glm-4.7-flash`) naturally return `thinking` blocks as part of their reasoning process. The proxy fully supports this format.
+
+## Testing
+
+Verify the proxy is running:
+```bash
+curl http://localhost:4000/
+# Expected: {"message":"Claude Code Proxy"}
+```
+
+Test with different providers:
+```bash
+# OpenRouter (free model)
+curl -X POST http://localhost:4000/openai:stepfun/step-3.5-flash:free/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dummy" \
+  -d '{"model":"stepfun/step-3.5-flash:free","max_tokens":100,"messages":[{"role":"user","content":"Say Hello"}]}'
+
+# NVIDIA NIM
+curl -X POST http://localhost:4000/openai:nvidia/nemotron-3-nano-30b-a3b/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dummy" \
+  -d '{"model":"nvidia/nemotron-3-nano-30b-a3b","max_tokens":100,"messages":[{"role":"user","content":"Say Hello"}]}'
+
+# Ollama (native format)
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dummy" \
+  -d '{"model":"claude-sonnet-4","max_tokens":100,"messages":[{"role":"user","content":"Say Hello"}]}'
+```
 
 ## How It Works
 
-1. Receives requests in Anthropic API format
-2. Maps model names based on configuration
-3. Translates to LiteLLM/OpenAI format
-4. Sends to configured backend
-5. Converts response back to Anthropic format
+1. **Receives** requests in Anthropic API format
+2. **Detects** target provider from model name prefix
+3. **Routes** to appropriate backend:
+   - **Ollama**: Native Anthropic format (zero conversion)
+   - **Others**: Converts to LiteLLM/OpenAI format
+4. **Returns** response in Anthropic format
 
 Supports both streaming and non-streaming responses.
 

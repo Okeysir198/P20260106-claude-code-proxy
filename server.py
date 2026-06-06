@@ -307,10 +307,16 @@ def get_credentials_for_provider(provider: str, model: str) -> dict:
     credentials = {}
 
     if provider == "openai":
+        # The dynamic route (`/openai:<model>/v1/messages`) prefixes the model as
+        # `openai/<model>`. Strip that leading `openai/` before prefix-matching so a
+        # vendor-namespaced model like `nvidia/nemotron-…` resolves to its real
+        # upstream (NVIDIA) instead of colliding with the `openai/` OpenRouter entry.
+        match_model = model[len("openai/"):] if model.lower().startswith("openai/") else model
+
         # Check if model matches a known OpenAI-compatible provider pattern
         matched_provider = None
         for prefix, (api_key_var, base_url_var, provider_name) in OPENAI_COMPATIBLE_PROVIDERS.items():
-            if model.lower().startswith(prefix):
+            if match_model.lower().startswith(prefix):
                 matched_provider = (api_key_var, base_url_var, provider_name)
                 break
 
@@ -325,7 +331,7 @@ def get_credentials_for_provider(provider: str, model: str) -> dict:
                 if base_url:
                     credentials["api_base"] = base_url
                     # Add NVIDIA reasoning settings for NVIDIA provider
-                    if provider_name == "nvidia" and "nemotron" in model.lower():
+                    if provider_name == "nvidia" and "nemotron" in match_model.lower():
                         credentials["extra_body"] = {
                             "reasoning_budget": NVIDIA_REASONING_BUDGET,
                             "chat_template_kwargs": {"enable_thinking": NVIDIA_ENABLE_THINKING}
@@ -337,15 +343,17 @@ def get_credentials_for_provider(provider: str, model: str) -> dict:
                     logger.warning(f"{provider_name.upper()} base URL not configured")
             else:
                 logger.warning(f"{provider_name.upper()} API key not configured, falling back to default OPENAI credentials")
-                # Fall through to default credentials - use the else branch below
+                # Fall through to the default-OpenAI credentials below.
                 matched_provider = None
-        else:
-            # Use default OpenAI credentials
+
+        # Default OpenAI credentials — used when no provider prefix matched OR the
+        # matched provider had no API key configured (the fall-through above).
+        if not matched_provider:
             credentials["api_key"] = OPENAI_API_KEY
             if OPENAI_BASE_URL:
                 credentials["api_base"] = OPENAI_BASE_URL
                 # Add NVIDIA reasoning settings only for nemotron models
-                if "nemotron" in model.lower():
+                if "nemotron" in match_model.lower():
                     credentials["extra_body"] = {
                         "reasoning_budget": NVIDIA_REASONING_BUDGET,
                         "chat_template_kwargs": {"enable_thinking": NVIDIA_ENABLE_THINKING}

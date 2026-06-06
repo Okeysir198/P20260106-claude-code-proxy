@@ -23,48 +23,71 @@ A universal proxy server that allows **Claude Code CLI** and **Claude Agent SDK*
 - **🔌 400+ OpenRouter Models** - Access to latest open-weight models
 - **🛠️ Tool Use Support** - Full function calling support across providers
 
-## Quick Start
+## Run
+
+> All commands below are run **from the repository root** (the folder containing
+> `server.py`). No absolute paths required.
 
 ### Prerequisites
 
-- Python 3.10+
-- [uv](https://github.com/astral-sh/uv) package manager
-- API keys for your chosen providers (all optional - use what you want!)
+- Python 3.10+ and [uv](https://github.com/astral-sh/uv) — *or* Docker.
+- An API key for at least one provider (e.g. a free NVIDIA key from
+  [build.nvidia.com](https://build.nvidia.com/)).
 
-### Setup
-
-1. Clone and install:
-   ```bash
-   git clone https://github.com/Okeysir198/P20260106-claude-code-proxy.git
-   cd P20260106-claude-code-proxy
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
-
-2. Configure environment:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys
-   ```
-
-3. Run the server:
-   ```bash
-   uv run uvicorn server:app --host 0.0.0.0 --port 4000 --reload
-   ```
-
-4. Use with Claude Code:
-   ```bash
-   # Uses your default provider (configured in .env)
-   ANTHROPIC_BASE_URL=http://localhost:4000 claude
-
-   # Or specify any model dynamically via URL
-   ANTHROPIC_BASE_URL=http://localhost:4000/openai:stepfun/step-3.5-flash:free claude
-   ```
-
-### Docker
+### 1. Configure `.env`
 
 ```bash
-docker compose up -d
+cp .env.example .env
+# edit .env — fill in your key(s). OPTION 1 is preconfigured for
+# NVIDIA Nemotron-3-Ultra-550B; paste your nvapi-... key into BOTH
+# OPENAI_API_KEY and NVIDIA_API_KEY (see the prefix-collision note in .env.example).
 ```
+
+### 2. Start the proxy on `:4000`
+
+```bash
+# Docker (recommended — binds :4000, reads .env)
+docker compose up -d
+docker compose logs -f          # follow logs
+docker compose down             # stop
+
+# …or run it directly with uv
+uv run uvicorn server:app --host 0.0.0.0 --port 4000 --reload
+```
+
+Verify it's up:
+
+```bash
+curl http://localhost:4000/        # -> {"message":"Claude Code Proxy"}
+```
+
+### 3. Point a client at it
+
+**Claude Code CLI** — pin the model in the URL path (dynamic mode):
+
+```bash
+# NVIDIA Nemotron-3-Ultra-550B
+ANTHROPIC_BASE_URL=http://localhost:4000/openai:nvidia/nemotron-3-ultra-550b-a55b \
+  ANTHROPIC_API_KEY=dummy claude
+
+# …or use the .env default provider/model (static mode)
+ANTHROPIC_BASE_URL=http://localhost:4000 ANTHROPIC_API_KEY=dummy claude
+```
+
+The proxy holds the real upstream key, so the client's `ANTHROPIC_API_KEY` is
+unused — pass any non-empty value.
+
+**Claude Agent SDK (`claude_sdk` in the livekit-voice-agents repo)** — already
+wired: `claude_sdk/config.yaml` sets `provider: proxy` with
+`base_url: http://localhost:4000/openai:nvidia/nemotron-3-ultra-550b-a55b`. Just
+start this proxy first, then run the agent (or its CLI in standalone mode —
+`python -m claude_sdk.cli.main serve` + `... chat --mount standalone`).
+
+> ⏱️ **Heads-up:** the hosted **550B** model on build.nvidia.com's free tier is
+> high-variance — a turn can take anywhere from seconds to a couple of minutes,
+> especially with `NVIDIA_REASONING_BUDGET` high. Lower the budget (or set
+> `NVIDIA_ENABLE_THINKING=false`) for snappier replies, or use a smaller model
+> like `nvidia/nemotron-3-nano-30b-a3b`.
 
 ## Multi-Provider Configuration
 
